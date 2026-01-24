@@ -40,12 +40,12 @@ def load_config() -> Tuple[str, List[str], str]:
     exchange_plan = os.environ.get(ENV_EXCHANGE_PLAN, "plan500")
 
     if not raw_cookies:
-        logger.warning("环境变量 'COOKIES' 未设置。")
+        logger.warning(f"环境变量 '{ENV_COOKIES}' 未设置。")
         cookies_list = []
     else:
         cookies_list = [cookie.strip() for cookie in raw_cookies.split('&') if cookie.strip()]
         if not cookies_list:
-            raise ValueError("环境变量 'COOKIES' 已设置，但未包含任何有效的 Cookie。")
+            raise ValueError(f"环境变量 '{ENV_COOKIES}' 已设置，但未包含任何有效的 Cookie。")
 
     logger.info(f"共加载了 {len(cookies_list)} 个 Cookie 用于签到。")
     return push_key, cookies_list, exchange_plan
@@ -224,7 +224,7 @@ def main():
         title, content = "# 脚本执行出错", str(e)
 
     if not push_key:
-        logger.info("未设置 PUSHDEER_KEY，跳过推送通知。")
+        logger.info(f"未设置 '{PUSHDEER_SENDKEY}'，跳过推送通知。")
     else:
         try:
             pushdeer = PushDeer(pushkey=push_key)
@@ -236,3 +236,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
