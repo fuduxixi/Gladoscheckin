@@ -45,24 +45,43 @@ HEADERS_TEMPLATE = {
 }
 
 # Exchange Plan Points
-EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500}
+EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500} 
 
 def load_config() -> Tuple[str, List[str], str]:
-    push_key = os.environ.get(ENV_PUSH_KEY, '')
-    raw_cookies = os.environ.get(ENV_COOKIES, '')
-    exchange_plan = os.environ.get(ENV_EXCHANGE_PLAN, 'plan500')
+    push_key_env = os.environ.get(ENV_PUSH_KEY)
+    raw_cookies_env = os.environ.get(ENV_COOKIES)
+    exchange_plan_env = os.environ.get(ENV_EXCHANGE_PLAN)
 
-    if not raw_cookies:
+    if not push_key_env:
+        logger.warning(f"环境变量 '{ENV_PUSH_KEY}' 未设置。")
+        push_key = ''
+    else:
+        push_key = push_key_env
+
+    if not raw_cookies_env:
         logger.warning(f"环境变量 '{ENV_COOKIES}' 未设置。")
         cookies_list = []
     else:
-        cookies_list = [cookie.strip() for cookie in raw_cookies.split('&') if cookie.strip()]
+        cookies_list = [cookie.strip() for cookie in raw_cookies_env.split('&') if cookie.strip()]
         if not cookies_list:
             raise ValueError(f"环境变量 '{ENV_COOKIES}' 已设置，但未包含任何有效的 Cookie。")
 
+    if not exchange_plan_env:
+        logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 未设置，将使用默认兑换计划 'plan500'。")
+        exchange_plan = "plan500"
+    else: 
+        if exchange_plan_env in EXCHANGE_POINTS:
+             exchange_plan = exchange_plan_env
+             logger.info(f"使用指定的兑换计划: {exchange_plan}")
+        else:
+            logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 的值 '{exchange_plan_env}' 无效，将使用默认兑换计划 'plan500'。")
+            exchange_plan = "plan500"
+
+
     logger.info(f"共加载了 {len(cookies_list)} 个 Cookie 用于签到。")
-    logger.info(f"当前 {ENV_PUSH_KEY} : {push_key}")
-    logger.info(f"当前 {ENV_EXCHANGE_PLAN} : {exchange_plan}")
+    logger.info(f"当前 {ENV_PUSH_KEY} {'已设置' if push_key_env else '未设置'}。")
+    logger.info(f"当前 {ENV_EXCHANGE_PLAN}: {exchange_plan}。")
+
     return push_key, cookies_list, exchange_plan
 
 
@@ -160,7 +179,7 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
     except (ValueError, TypeError):
         logger.warning(f"无法解析当前积分数值，可能影响兑换判断: {remaining_points}")
 
-    required_points = EXCHANGE_POINTS.get(exchange_plan, 500)
+    required_points = EXCHANGE_POINTS.get(exchange_plan, 500) 
     if current_points_numeric >= required_points:
         logger.info(f"开始兑换 {exchange_plan} 计划 (需要 {required_points} 积分)")
         exchange_response = make_request(EXCHANGE_URL, 'POST', HEADERS_TEMPLATE, {"planType": exchange_plan}, cookies=cookie)
