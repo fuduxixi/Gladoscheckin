@@ -50,11 +50,10 @@ EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500}
 def load_config() -> Tuple[str, List[str], str]:
     push_key = os.environ.get(ENV_PUSH_KEY, '')
     raw_cookies = os.environ.get(ENV_COOKIES, '')
-    exchange_plan = os.environ.get(ENV_EXCHANGE_PLAN, "plan500")
+    exchange_plan = os.environ.get(ENV_EXCHANGE_PLAN, 'plan500')
 
     if not raw_cookies:
         logger.warning(f"环境变量 '{ENV_COOKIES}' 未设置。")
-        cookies_list = []
         cookies_list = []
     else:
         cookies_list = [cookie.strip() for cookie in raw_cookies.split('&') if cookie.strip()]
@@ -250,6 +249,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
