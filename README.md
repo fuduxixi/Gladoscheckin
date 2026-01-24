@@ -14,7 +14,7 @@
 
 1. 跳转至自己的仓库的`Settings`->`Secrets and variables`->`Action`
 
-2. 添加1个`repository secret`，命名为`COOKIES`，其值对应GLaDOS账号的cookie值中的有效部分（获取方式如下）
+2. 添加1个`repository secret`，命名为`GLADOS_COOKIES`，其值对应GLaDOS账号的cookie值中的有效部分（获取方式如下）
 
 - 在GLaDOS的签到页面按`F12`
 
@@ -30,7 +30,19 @@
 
 - 多账号请在 `COOKIES` 中 添加多个 `cookies` 中间使用 `&`连接即可。（例如： `c1&c3&c3...`）
 
-3. 手机推送（非必须）
+3. 配置积分兑换策略
+
+- 添加1个`repository secret`，命名为`GLADOS_EXCHANGE_PLAN`，配置自动兑换积分策略：
+
+| 值 | 积分要求 | 兑换天数 |
+|---|---------|---------|
+| `plan100` | 100 积分 | 10 天 |
+| `plan200` | 200 积分 | 30 天 |
+| `plan500` | 500 积分 | 100 天 (默认) |
+
+> 不配置时默认为 `plan500`，即积分达到 500 时自动兑换 100 天
+
+4. 手机推送（非必须）
 
 - 添加1个`repository secret`，命名为`SENDKEY`，其值对应 PushDeer key: ([获取地址](https://www.pushdeer.com/product.html))。
 
@@ -51,3 +63,4 @@
 ## 声明
 
 本项目不保证稳定运行与更新, 因GitHub相关规定可能会删库, 请注意备份
+
