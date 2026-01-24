@@ -2,12 +2,25 @@ import requests
 import json
 import os
 import logging
+import datetime
 from typing import Dict, List, Optional, Tuple
 from pypushdeer import PushDeer
 
-# 设置日志
+def beijing_time_converter(timestamp):
+    utc_dt = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
+    beijing_tz = datetime.timezone(datetime.timedelta(hours=8))
+    beijing_dt = utc_dt.astimezone(beijing_tz)
+    return beijing_dt.timetuple()
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+root_logger = logging.getLogger()
+for handler in root_logger.handlers:
+    if hasattr(handler, 'formatter') and handler.formatter is not None:
+        handler.formatter.converter = beijing_time_converter
+
 logger = logging.getLogger(__name__)
+
 
 # ENVIRONMENT
 ENV_PUSH_KEY = "PUSHDEER_SENDKEY"
@@ -35,12 +48,13 @@ HEADERS_TEMPLATE = {
 EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500}
 
 def load_config() -> Tuple[str, List[str], str]:
-    push_key = os.environ.get(ENV_PUSH_KEY, "")
-    raw_cookies = os.environ.get(ENV_COOKIES, "")
+    push_key = os.environ.get(ENV_PUSH_KEY, '')
+    raw_cookies = os.environ.get(ENV_COOKIES, '')
     exchange_plan = os.environ.get(ENV_EXCHANGE_PLAN, "plan500")
 
     if not raw_cookies:
         logger.warning(f"环境变量 '{ENV_COOKIES}' 未设置。")
+        cookies_list = []
         cookies_list = []
     else:
         cookies_list = [cookie.strip() for cookie in raw_cookies.split('&') if cookie.strip()]
@@ -236,5 +250,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
