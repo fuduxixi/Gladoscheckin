@@ -61,6 +61,8 @@ def load_config() -> Tuple[str, List[str], str]:
             raise ValueError(f"环境变量 '{ENV_COOKIES}' 已设置，但未包含任何有效的 Cookie。")
 
     logger.info(f"共加载了 {len(cookies_list)} 个 Cookie 用于签到。")
+    logger.info(f"当前 {ENV_PUSH_KEY} : {push_key}")
+    logger.info(f"当前 {ENV_EXCHANGE_PLAN} : {exchange_plan}")
     return push_key, cookies_list, exchange_plan
 
 
@@ -160,7 +162,7 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
 
     required_points = EXCHANGE_POINTS.get(exchange_plan, 500)
     if current_points_numeric >= required_points:
-        logger.info(f"开始兑换 {exchange_plan} 计划 ({required_points} 积分所需)")
+        logger.info(f"开始兑换 {exchange_plan} 计划 (需要 {required_points} 积分)")
         exchange_response = make_request(EXCHANGE_URL, 'POST', HEADERS_TEMPLATE, {"planType": exchange_plan}, cookies=cookie)
         if exchange_response:
             try:
