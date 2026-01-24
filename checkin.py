@@ -224,7 +224,7 @@ def main():
         title, content = "# 脚本执行出错", str(e)
 
     if not push_key:
-        logger.info(f"未设置 '{PUSHDEER_SENDKEY}'，跳过推送通知。")
+        logger.info(f"未设置 '{ENV_PUSH_KEY}'，跳过推送通知。")
     else:
         try:
             pushdeer = PushDeer(pushkey=push_key)
@@ -236,4 +236,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
