@@ -64,10 +64,16 @@
 
 - **2026-01**: 重构代码，添加log输出方便定位，支持新版网址，支持配置积分兑换策略。
 
-  
+
+## 问题排查与定位
+- 大家可以通过查询 actions 中的 running checkin 日志快速定位问题，有其他问题提交issue。
+  <img width="1684" height="844" alt="image" src="https://github.com/user-attachments/assets/45348a5f-43e4-45f5-8fdf-ce84d343b30d" />
+
 ## 声明
 
 本项目不保证稳定运行与更新, 因GitHub相关规定可能会删库, 请注意备份
+
+
 
 
 
