@@ -2,9 +2,7 @@
 
 ## 食用方式：
 
-### 注册一个GLaDOS的账号([注册地址](https://glados.space/landing/0A58E-NV28S-6U3QV-33VMG))
-
-#### 我的邀请码：([0A58E-NV28S-6U3QV-33VMG](https://0a58e-nv28s-6u3qv-33vmg.glados.space)) 
+### 注册一个GLaDOS的账号（https://glados.one）
 
 ### **Fork**本仓库
 
@@ -42,7 +40,7 @@
 
 > 不配置时默认为 `plan500`，即积分达到 500 时自动兑换 100 天
 
-4. 手机推送（非必须）
+4. 推送（非必须）
 
 - PushDeer：添加1个`repository secret`，命名为`PUSHDEER_SENDKEY`，其值对应 PushDeer key: ([获取地址](https://www.pushdeer.com/product.html))。
 - Telegram Bot：添加2到3个`repository secret`
