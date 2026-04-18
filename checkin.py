@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 # ENVIRONMENT
 ENV_PUSH_KEY = "PUSHDEER_SENDKEY"
+ENV_TG_BOT_TOKEN = "TG_BOT_TOKEN"
+ENV_TG_CHAT_ID = "TG_CHAT_ID"
 ENV_COOKIES = "GLADOS_COOKIES"
 ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
 
@@ -32,6 +34,7 @@ CHECKIN_URL = "https://glados.cloud/api/user/checkin"
 STATUS_URL = "https://glados.cloud/api/user/status"
 POINTS_URL = "https://glados.cloud/api/user/points"
 EXCHANGE_URL = "https://glados.cloud/api/user/exchange"
+TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
 # POST DATA
 CHECKIN_DATA = {"token": "glados.cloud"} 
@@ -47,8 +50,10 @@ HEADERS_TEMPLATE = {
 # Exchange Plan Points
 EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500} 
 
-def load_config() -> Tuple[str, List[str], str]:
+def load_config() -> Tuple[str, str, str, List[str], str]:
     push_key_env = os.environ.get(ENV_PUSH_KEY)
+    tg_bot_token_env = os.environ.get(ENV_TG_BOT_TOKEN)
+    tg_chat_id_env = os.environ.get(ENV_TG_CHAT_ID)
     raw_cookies_env = os.environ.get(ENV_COOKIES)
     exchange_plan_env = os.environ.get(ENV_EXCHANGE_PLAN)
 
@@ -57,6 +62,17 @@ def load_config() -> Tuple[str, List[str], str]:
         push_key = ''
     else:
         push_key = push_key_env
+
+    if not tg_bot_token_env or not tg_chat_id_env:
+        if tg_bot_token_env or tg_chat_id_env:
+            logger.warning(
+                f"Telegram Bot 推送配置不完整，需要同时设置 '{ENV_TG_BOT_TOKEN}' 和 '{ENV_TG_CHAT_ID}'。"
+            )
+        tg_bot_token = ''
+        tg_chat_id = ''
+    else:
+        tg_bot_token = tg_bot_token_env
+        tg_chat_id = tg_chat_id_env
 
     if not raw_cookies_env:
         logger.warning(f"环境变量 '{ENV_COOKIES}' 未设置。")
@@ -69,20 +85,22 @@ def load_config() -> Tuple[str, List[str], str]:
     if not exchange_plan_env:
         logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 未设置，将使用默认兑换计划 'plan500'。")
         exchange_plan = "plan500"
-    else: 
+    else:
         if exchange_plan_env in EXCHANGE_POINTS:
-             exchange_plan = exchange_plan_env
-             logger.info(f"使用指定的兑换计划: {exchange_plan}")
+            exchange_plan = exchange_plan_env
+            logger.info(f"使用指定的兑换计划: {exchange_plan}")
         else:
             logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 的值 '{exchange_plan_env}' 无效，将使用默认兑换计划 'plan500'。")
             exchange_plan = "plan500"
 
-
     logger.info(f"共加载了 {len(cookies_list)} 个 Cookie 用于签到。")
     logger.info(f"当前 {ENV_PUSH_KEY} {'已设置' if push_key_env else '未设置'}。")
+    logger.info(
+        f"当前 Telegram Bot 推送 {'已设置' if tg_bot_token and tg_chat_id else '未设置'}。"
+    )
     logger.info(f"当前 {ENV_EXCHANGE_PLAN}: {exchange_plan}。")
 
-    return push_key, cookies_list, exchange_plan
+    return push_key, tg_bot_token, tg_chat_id, cookies_list, exchange_plan
 
 
 def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[Dict] = None, cookies: str = "") -> Optional[requests.Response]:
@@ -229,9 +247,38 @@ def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
     return title, content
 
 
+def send_pushdeer_notification(push_key: str, title: str, content: str) -> bool:
+    try:
+        pushdeer = PushDeer(pushkey=push_key)
+        pushdeer.send_text(title, desp=content)
+        logger.info("PushDeer 推送发送成功。")
+        return True
+    except Exception as e:
+        logger.error(f"发送 PushDeer 推送失败: {e}")
+        return False
+
+
+def send_telegram_notification(bot_token: str, chat_id: str, title: str, content: str) -> bool:
+    payload = {
+        "chat_id": chat_id,
+        "text": f"{title}\n\n{content}",
+        "disable_web_page_preview": True,
+    }
+    try:
+        response = requests.post(TELEGRAM_API_URL.format(token=bot_token), json=payload, timeout=15)
+        if not response.ok:
+            logger.error(f"发送 Telegram Bot 推送失败，状态码 {response.status_code}: {response.text}")
+            return False
+        logger.info("Telegram Bot 推送发送成功。")
+        return True
+    except requests.exceptions.RequestException as e:
+        logger.error(f"发送 Telegram Bot 推送失败: {e}")
+        return False
+
+
 def main():
     try:
-        push_key, cookies_list, exchange_plan = load_config()
+        push_key, tg_bot_token, tg_chat_id, cookies_list, exchange_plan = load_config()
 
         if not cookies_list:
             logger.error("未找到有效的 Cookie，退出程序。")
@@ -257,15 +304,21 @@ def main():
         logger.error(f"主程序执行过程中发生未预期的错误: {e}")
         title, content = "# 脚本执行出错", str(e)
 
-    if not push_key:
-        logger.info(f"未设置 '{ENV_PUSH_KEY}'，跳过推送通知。")
+    sent = False
+    if push_key:
+        sent = send_pushdeer_notification(push_key, title, content) or sent
     else:
-        try:
-            pushdeer = PushDeer(pushkey=push_key)
-            pushdeer.send_text(title, desp=content)
-            logger.info("推送通知发送成功。")
-        except Exception as e:
-            logger.error(f"发送推送通知失败: {e}")
+        logger.info(f"未设置 '{ENV_PUSH_KEY}'，跳过 PushDeer 推送。")
+
+    if tg_bot_token and tg_chat_id:
+        sent = send_telegram_notification(tg_bot_token, tg_chat_id, title, content) or sent
+    else:
+        logger.info(
+            f"未完整设置 '{ENV_TG_BOT_TOKEN}' 与 '{ENV_TG_CHAT_ID}'，跳过 Telegram Bot 推送。"
+        )
+
+    if not sent:
+        logger.info("未发送任何推送通知。")
 
 
 if __name__ == '__main__':
