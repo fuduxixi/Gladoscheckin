@@ -27,6 +27,7 @@ ENV_PUSH_KEY = "PUSHDEER_SENDKEY"
 ENV_TG_BOT_TOKEN = "TG_BOT_TOKEN"
 ENV_TG_CHAT_ID = "TG_CHAT_ID"
 ENV_TG_MESSAGE_THREAD_ID = "TG_MESSAGE_THREAD_ID"
+ENV_ACCOUNT_NAMES = "GLADOS_ACCOUNT_NAMES"
 ENV_COOKIES = "GLADOS_COOKIES"
 ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
 
@@ -51,11 +52,12 @@ HEADERS_TEMPLATE = {
 # Exchange Plan Points
 EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500} 
 
-def load_config() -> Tuple[str, str, str, str, List[str], str]:
+def load_config() -> Tuple[str, str, str, str, List[str], List[str], str]:
     push_key_env = os.environ.get(ENV_PUSH_KEY)
     tg_bot_token_env = os.environ.get(ENV_TG_BOT_TOKEN)
     tg_chat_id_env = os.environ.get(ENV_TG_CHAT_ID)
     tg_message_thread_id_env = os.environ.get(ENV_TG_MESSAGE_THREAD_ID)
+    account_names_env = os.environ.get(ENV_ACCOUNT_NAMES)
     raw_cookies_env = os.environ.get(ENV_COOKIES)
     exchange_plan_env = os.environ.get(ENV_EXCHANGE_PLAN)
 
@@ -86,6 +88,11 @@ def load_config() -> Tuple[str, str, str, str, List[str], str]:
         if not cookies_list:
             raise ValueError(f"环境变量 '{ENV_COOKIES}' 已设置，但未包含任何有效的 Cookie。")
 
+    if not account_names_env:
+        account_names = []
+    else:
+        account_names = [name.strip() for name in account_names_env.split('&') if name.strip()]
+
     if not exchange_plan_env:
         logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 未设置，将使用默认兑换计划 'plan500'。")
         exchange_plan = "plan500"
@@ -97,6 +104,11 @@ def load_config() -> Tuple[str, str, str, str, List[str], str]:
             logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 的值 '{exchange_plan_env}' 无效，将使用默认兑换计划 'plan500'。")
             exchange_plan = "plan500"
 
+    if account_names and len(account_names) != len(cookies_list):
+        logger.warning(
+            f"环境变量 '{ENV_ACCOUNT_NAMES}' 中的账号数量与 Cookie 数量不一致，将对缺失项回退为默认账号名。"
+        )
+
     logger.info(f"共加载了 {len(cookies_list)} 个 Cookie 用于签到。")
     logger.info(f"当前 {ENV_PUSH_KEY} {'已设置' if push_key_env else '未设置'}。")
     logger.info(
@@ -107,7 +119,7 @@ def load_config() -> Tuple[str, str, str, str, List[str], str]:
     )
     logger.info(f"当前 {ENV_EXCHANGE_PLAN}: {exchange_plan}。")
 
-    return push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, exchange_plan
+    return push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, account_names, exchange_plan
 
 
 def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[Dict] = None, cookies: str = "") -> Optional[requests.Response]:
@@ -233,7 +245,13 @@ def has_failures(results: List[Dict[str, str]]) -> bool:
     return any("失败" in r['status'] or "失败" in r['exchange'] for r in results)
 
 
-def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
+def get_account_label(account_names: List[str], index: int) -> str:
+    if index < len(account_names) and account_names[index]:
+        return account_names[index]
+    return f"账号 {index + 1}"
+
+
+def format_push_content(results: List[Dict[str, str]], account_names: List[str]) -> Tuple[str, str]:
 
     success_count = sum(1 for r in results if "成功" in r['status'])
     fail_count = sum(1 for r in results if "失败" in r['status'] or "失败" in r['exchange'])
@@ -242,9 +260,9 @@ def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
     title = f'GLaDOS 签到, 成功{success_count}, 失败{fail_count}, 重复{repeat_count}'
 
     content_lines = []
-    for i, res in enumerate(results, 1):
+    for i, res in enumerate(results):
         line_parts = [
-            f"账号{i}:",
+            f"{get_account_label(account_names, i)}:",
             f"P:{res['points']}",
             f"剩余天数:{res['days']}",
             f"总积分:{res['points_total']}",
@@ -258,7 +276,7 @@ def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
     return title, content
 
 
-def format_telegram_content(results: List[Dict[str, str]]) -> str:
+def format_telegram_content(results: List[Dict[str, str]], account_names: List[str]) -> str:
     success_count = sum(1 for r in results if "成功" in r['status'])
     fail_count = sum(1 for r in results if "失败" in r['status'] or "失败" in r['exchange'])
     repeat_count = sum(1 for r in results if "重复" in r['status'])
@@ -272,9 +290,9 @@ def format_telegram_content(results: List[Dict[str, str]]) -> str:
         ""
     ]
 
-    for i, res in enumerate(results, 1):
+    for i, res in enumerate(results):
         lines.extend([
-            f"*账号 {i}*",
+            f"*{get_account_label(account_names, i)}*",
             f"- 本次积分: `{res['points']}`",
             f"- 剩余天数: `{res['days']}`",
             f"- 总积分: `{res['points_total']}`",
@@ -335,7 +353,7 @@ def main():
     tg_message_thread_id = ''
 
     try:
-        push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, exchange_plan = load_config()
+        push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, account_names, exchange_plan = load_config()
 
         if not cookies_list:
             logger.error("未找到有效的 Cookie，退出程序。")
@@ -354,8 +372,8 @@ def main():
                     'exchange': exchange
                 })
 
-            title, content = format_push_content(results)
-            telegram_markdown_text = format_telegram_content(results)
+            title, content = format_push_content(results, account_names)
+            telegram_markdown_text = format_telegram_content(results, account_names)
             failed = has_failures(results)
             logger.info(f"推送标题: {title}")
             logger.info(f"推送内容:\n{content}")
