@@ -1,5 +1,7 @@
 # Glados自动签到
 
+支持 GLaDOS 自动签到、积分自动兑换、Telegram Bot 推送、Telegram 话题线程推送、多账号显示账号名称，以及失败时仅发送 Telegram 通知。
+
 ## 食用方式：
 
 ### 注册一个GLaDOS的账号（https://glados.one）
