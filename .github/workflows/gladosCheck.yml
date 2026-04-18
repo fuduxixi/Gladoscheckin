@@ -44,6 +44,7 @@ jobs:
         PUSHDEER_SENDKEY: ${{ secrets.PUSHDEER_SENDKEY }}
         TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        TG_MESSAGE_THREAD_ID: ${{ secrets.TG_MESSAGE_THREAD_ID }}
         GLADOS_COOKIES: ${{ secrets.GLADOS_COOKIES }}
         GLADOS_EXCHANGE_PLAN: ${{ secrets.GLADOS_EXCHANGE_PLAN }}
 

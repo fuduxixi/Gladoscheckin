@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 ENV_PUSH_KEY = "PUSHDEER_SENDKEY"
 ENV_TG_BOT_TOKEN = "TG_BOT_TOKEN"
 ENV_TG_CHAT_ID = "TG_CHAT_ID"
+ENV_TG_MESSAGE_THREAD_ID = "TG_MESSAGE_THREAD_ID"
 ENV_COOKIES = "GLADOS_COOKIES"
 ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
 
@@ -50,10 +51,11 @@ HEADERS_TEMPLATE = {
 # Exchange Plan Points
 EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500} 
 
-def load_config() -> Tuple[str, str, str, List[str], str]:
+def load_config() -> Tuple[str, str, str, str, List[str], str]:
     push_key_env = os.environ.get(ENV_PUSH_KEY)
     tg_bot_token_env = os.environ.get(ENV_TG_BOT_TOKEN)
     tg_chat_id_env = os.environ.get(ENV_TG_CHAT_ID)
+    tg_message_thread_id_env = os.environ.get(ENV_TG_MESSAGE_THREAD_ID)
     raw_cookies_env = os.environ.get(ENV_COOKIES)
     exchange_plan_env = os.environ.get(ENV_EXCHANGE_PLAN)
 
@@ -73,6 +75,8 @@ def load_config() -> Tuple[str, str, str, List[str], str]:
     else:
         tg_bot_token = tg_bot_token_env
         tg_chat_id = tg_chat_id_env
+
+    tg_message_thread_id = (tg_message_thread_id_env or '').strip()
 
     if not raw_cookies_env:
         logger.warning(f"环境变量 '{ENV_COOKIES}' 未设置。")
@@ -98,9 +102,12 @@ def load_config() -> Tuple[str, str, str, List[str], str]:
     logger.info(
         f"当前 Telegram Bot 推送 {'已设置' if tg_bot_token and tg_chat_id else '未设置'}。"
     )
+    logger.info(
+        f"当前 Telegram 话题 {'已设置' if tg_message_thread_id else '未设置'}。"
+    )
     logger.info(f"当前 {ENV_EXCHANGE_PLAN}: {exchange_plan}。")
 
-    return push_key, tg_bot_token, tg_chat_id, cookies_list, exchange_plan
+    return push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, exchange_plan
 
 
 def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[Dict] = None, cookies: str = "") -> Optional[requests.Response]:
@@ -222,6 +229,10 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
     return status_msg, points_gained, remaining_days, remaining_points, exchange_msg
 
 
+def has_failures(results: List[Dict[str, str]]) -> bool:
+    return any("失败" in r['status'] or "失败" in r['exchange'] for r in results)
+
+
 def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
 
     success_count = sum(1 for r in results if "成功" in r['status'])
@@ -247,6 +258,34 @@ def format_push_content(results: List[Dict[str, str]]) -> Tuple[str, str]:
     return title, content
 
 
+def format_telegram_content(results: List[Dict[str, str]]) -> str:
+    success_count = sum(1 for r in results if "成功" in r['status'])
+    fail_count = sum(1 for r in results if "失败" in r['status'] or "失败" in r['exchange'])
+    repeat_count = sum(1 for r in results if "重复" in r['status'])
+
+    lines = [
+        "*GLaDOS 签到结果*",
+        "",
+        f"- 成功: {success_count}",
+        f"- 失败: {fail_count}",
+        f"- 重复: {repeat_count}",
+        ""
+    ]
+
+    for i, res in enumerate(results, 1):
+        lines.extend([
+            f"*账号 {i}*",
+            f"- 本次积分: `{res['points']}`",
+            f"- 剩余天数: `{res['days']}`",
+            f"- 总积分: `{res['points_total']}`",
+            f"- 签到状态: {res['status']}",
+            f"- 兑换状态: {res['exchange']}",
+            ""
+        ])
+
+    return "\n".join(lines).strip()
+
+
 def send_pushdeer_notification(push_key: str, title: str, content: str) -> bool:
     try:
         pushdeer = PushDeer(pushkey=push_key)
@@ -258,12 +297,22 @@ def send_pushdeer_notification(push_key: str, title: str, content: str) -> bool:
         return False
 
 
-def send_telegram_notification(bot_token: str, chat_id: str, title: str, content: str) -> bool:
+def send_telegram_notification(
+    bot_token: str,
+    chat_id: str,
+    message_thread_id: str,
+    title: str,
+    content: str,
+    markdown_text: Optional[str] = None
+) -> bool:
     payload = {
         "chat_id": chat_id,
-        "text": f"{title}\n\n{content}",
+        "text": markdown_text or f"{title}\n\n{content}",
+        "parse_mode": "Markdown",
         "disable_web_page_preview": True,
     }
+    if message_thread_id:
+        payload["message_thread_id"] = int(message_thread_id)
     try:
         response = requests.post(TELEGRAM_API_URL.format(token=bot_token), json=payload, timeout=15)
         if not response.ok:
@@ -277,14 +326,23 @@ def send_telegram_notification(bot_token: str, chat_id: str, title: str, content
 
 
 def main():
+    results: List[Dict[str, str]] = []
+    failed = False
+    telegram_markdown_text = None
+    push_key = ''
+    tg_bot_token = ''
+    tg_chat_id = ''
+    tg_message_thread_id = ''
+
     try:
-        push_key, tg_bot_token, tg_chat_id, cookies_list, exchange_plan = load_config()
+        push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, exchange_plan = load_config()
 
         if not cookies_list:
             logger.error("未找到有效的 Cookie，退出程序。")
+            failed = True
             title, content = "# 未找到 cookies!", ""
+            telegram_markdown_text = "*GLaDOS 签到执行失败*\n\n- 原因: 未找到有效 cookies"
         else:
-            results = []
             for idx, cookie in enumerate(cookies_list, 1):
                 logger.info(f"正在处理第 {idx} 个账户...")
                 status, points, days, points_total, exchange = checkin_and_process(cookie, exchange_plan)
@@ -297,25 +355,38 @@ def main():
                 })
 
             title, content = format_push_content(results)
+            telegram_markdown_text = format_telegram_content(results)
+            failed = has_failures(results)
             logger.info(f"推送标题: {title}")
             logger.info(f"推送内容:\n{content}")
 
     except Exception as e:
         logger.error(f"主程序执行过程中发生未预期的错误: {e}")
+        failed = True
         title, content = "# 脚本执行出错", str(e)
+        telegram_markdown_text = f"*GLaDOS 签到执行失败*\n\n- 异常: `{str(e)}`"
 
     sent = False
-    if push_key:
-        sent = send_pushdeer_notification(push_key, title, content) or sent
-    else:
-        logger.info(f"未设置 '{ENV_PUSH_KEY}'，跳过 PushDeer 推送。")
-
     if tg_bot_token and tg_chat_id:
-        sent = send_telegram_notification(tg_bot_token, tg_chat_id, title, content) or sent
+        sent = send_telegram_notification(
+            tg_bot_token,
+            tg_chat_id,
+            tg_message_thread_id,
+            title,
+            content,
+            telegram_markdown_text,
+        ) or sent
     else:
         logger.info(
             f"未完整设置 '{ENV_TG_BOT_TOKEN}' 与 '{ENV_TG_CHAT_ID}'，跳过 Telegram Bot 推送。"
         )
+
+    if failed:
+        logger.info("检测到失败结果，按配置跳过 PushDeer 推送。")
+    elif push_key:
+        sent = send_pushdeer_notification(push_key, title, content) or sent
+    else:
+        logger.info(f"未设置 '{ENV_PUSH_KEY}'，跳过 PushDeer 推送。")
 
     if not sent:
         logger.info("未发送任何推送通知。")

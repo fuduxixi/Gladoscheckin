@@ -45,10 +45,12 @@
 4. 手机推送（非必须）
 
 - PushDeer：添加1个`repository secret`，命名为`PUSHDEER_SENDKEY`，其值对应 PushDeer key: ([获取地址](https://www.pushdeer.com/product.html))。
-- Telegram Bot：添加2个`repository secret`
+- Telegram Bot：添加2到3个`repository secret`
   - `TG_BOT_TOKEN`：BotFather 创建的 bot token
   - `TG_CHAT_ID`：接收消息的 chat id（可填个人、群组或频道对应 id）
-- `PUSHDEER_SENDKEY` 与 `TG_BOT_*` 可以同时配置；脚本会分别尝试发送。
+  - `TG_MESSAGE_THREAD_ID`：可选，群组话题/论坛主题 id；不填则发送到默认会话
+- Telegram 消息默认使用 Markdown 格式。
+- 推送策略：优先发送 Telegram；若结果中存在失败，只发 Telegram，不发 PushDeer。无失败时，如果同时配置了 `PUSHDEER_SENDKEY`，则会额外发送 PushDeer。
 
 ### **star**自己的仓库
 
@@ -66,7 +68,7 @@
 
 ## 更新日志
 
-- **2026-04**: 新增 Telegram Bot 推送，支持与 PushDeer 并行发送。
+- **2026-04**: Telegram Bot 推送新增 Markdown、话题线程支持，并调整为失败时仅发送 Telegram。
 - **2026-01**: 重构代码，添加log输出方便定位，支持新版网址，支持配置积分兑换策略。
 
 
