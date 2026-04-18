@@ -49,6 +49,8 @@
   - `TG_BOT_TOKEN`：BotFather 创建的 bot token
   - `TG_CHAT_ID`：接收消息的 chat id（可填个人、群组或频道对应 id）
   - `TG_MESSAGE_THREAD_ID`：可选，群组话题/论坛主题 id；不填则发送到默认会话
+- 账号显示名：可选添加 `GLADOS_ACCOUNT_NAMES`，多个账号用 `&` 连接，顺序必须与 `GLADOS_COOKIES` 一一对应。
+  - 示例：`aaa@gmail.com&bbb@gmail.com`
 - Telegram 消息默认使用 Markdown 格式。
 - 推送策略：优先发送 Telegram；若结果中存在失败，只发 Telegram，不发 PushDeer。无失败时，如果同时配置了 `PUSHDEER_SENDKEY`，则会额外发送 PushDeer。
 
