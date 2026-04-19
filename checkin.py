@@ -376,7 +376,9 @@ def main():
             telegram_markdown_text = format_telegram_content(results, account_names)
             failed = has_failures(results)
             logger.info(f"推送标题: {title}")
-            logger.info(f"推送内容:\n{content}")
+            logger.info(
+                "推送正文已生成（为避免日志脱敏影响可读性，不在 Actions 日志中输出完整正文）。"
+            )
 
     except Exception as e:
         logger.error(f"主程序执行过程中发生未预期的错误: {e}")
