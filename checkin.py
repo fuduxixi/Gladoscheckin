@@ -28,6 +28,7 @@ ENV_TG_BOT_TOKEN = "TG_BOT_TOKEN"
 ENV_TG_CHAT_ID = "TG_CHAT_ID"
 ENV_TG_MESSAGE_THREAD_ID = "TG_MESSAGE_THREAD_ID"
 ENV_ACCOUNT_NAMES = "GLADOS_ACCOUNT_NAMES"
+ENV_ACCOUNT_SITES = "GLADOS_ACCOUNT_SITES"
 ENV_COOKIES = "GLADOS_COOKIES"
 ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
 ENV_SITE_ORDER = "GLADOS_SITE_ORDER"
@@ -143,12 +144,13 @@ def initialize_site_configs() -> None:
     )
 
 
-def load_config() -> Tuple[str, str, str, str, List[str], List[str], str]:
+def load_config() -> Tuple[str, str, str, str, List[str], List[str], List[str], str]:
     push_key_env = os.environ.get(ENV_PUSH_KEY)
     tg_bot_token_env = os.environ.get(ENV_TG_BOT_TOKEN)
     tg_chat_id_env = os.environ.get(ENV_TG_CHAT_ID)
     tg_message_thread_id_env = os.environ.get(ENV_TG_MESSAGE_THREAD_ID)
     account_names_env = os.environ.get(ENV_ACCOUNT_NAMES)
+    account_sites_env = os.environ.get(ENV_ACCOUNT_SITES)
     raw_cookies_env = os.environ.get(ENV_COOKIES)
     exchange_plan_env = os.environ.get(ENV_EXCHANGE_PLAN)
 
@@ -184,6 +186,11 @@ def load_config() -> Tuple[str, str, str, str, List[str], List[str], str]:
     else:
         account_names = [name.strip() for name in account_names_env.split('&') if name.strip()]
 
+    if not account_sites_env:
+        account_sites = []
+    else:
+        account_sites = [site.strip().lower() for site in account_sites_env.split('&') if site.strip()]
+
     if not exchange_plan_env:
         logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 未设置，将使用默认兑换计划 'plan500'。")
         exchange_plan = "plan500"
@@ -200,6 +207,17 @@ def load_config() -> Tuple[str, str, str, str, List[str], List[str], str]:
             f"环境变量 '{ENV_ACCOUNT_NAMES}' 中的账号数量与 Cookie 数量不一致，将对缺失项回退为默认账号名。"
         )
 
+    if account_sites and len(account_sites) != len(cookies_list):
+        logger.warning(
+            f"环境变量 '{ENV_ACCOUNT_SITES}' 中的站点数量与 Cookie 数量不一致，缺失项将回退为自动探测。"
+        )
+
+    invalid_sites = [site for site in account_sites if site not in DEFAULT_SITE_CONFIGS]
+    if invalid_sites:
+        logger.warning(
+            f"环境变量 '{ENV_ACCOUNT_SITES}' 含未知站点标识: {', '.join(invalid_sites)}；这些项将回退为自动探测。"
+        )
+
     logger.info(f"共加载了 {len(cookies_list)} 个 Cookie 用于签到。")
     logger.info(f"当前 {ENV_PUSH_KEY} {'已设置' if push_key_env else '未设置'}。")
     logger.info(
@@ -209,8 +227,11 @@ def load_config() -> Tuple[str, str, str, str, List[str], List[str], str]:
         f"当前 Telegram 话题 {'已设置' if tg_message_thread_id else '未设置'}。"
     )
     logger.info(f"当前 {ENV_EXCHANGE_PLAN}: {exchange_plan}。")
+    logger.info(
+        f"当前 {ENV_ACCOUNT_SITES} {'已设置' if account_sites else '未设置'}。"
+    )
 
-    return push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, account_names, exchange_plan
+    return push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, account_names, account_sites, exchange_plan
 
 
 def build_headers(site_key: str) -> Dict[str, str]:
@@ -241,6 +262,15 @@ def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[
         return None
 
 
+def get_forced_site(account_sites: List[str], index: int) -> Optional[str]:
+    if index >= len(account_sites):
+        return None
+    forced_site = account_sites[index]
+    if forced_site in SITE_CONFIGS:
+        return forced_site
+    return None
+
+
 def detect_site(cookie: str) -> Optional[str]:
     for site_key in SITE_DETECT_ORDER:
         site = SITE_CONFIGS[site_key]
@@ -262,9 +292,9 @@ def detect_site(cookie: str) -> Optional[str]:
     return None
 
 
-def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str, str, str, str]:
+def checkin_and_process(cookie: str, exchange_plan: str, forced_site: Optional[str] = None) -> Tuple[str, str, str, str, str, str]:
 
-    site_key = detect_site(cookie)
+    site_key = forced_site or detect_site(cookie)
     if not site_key:
         return "站点识别失败", "0", "获取剩余天数失败", "获取剩余积分失败", "兑换跳过或失败", "未知站点"
 
@@ -291,7 +321,12 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
 
         if "checkin" in response_message_lower and "got" in response_message_lower:
             status_msg = f"签到成功，获得 {points_gained} 积分"
-        elif "repeat" in response_message_lower or "already" in response_message_lower:
+        elif (
+            "repeat" in response_message_lower
+            or "already" in response_message_lower
+            or "return tomorrow" in response_message_lower
+            or "today's observation logged" in response_message_lower
+        ):
             status_msg = "重复签到，明天再来"
             points_gained = "0"
         elif checkin_data.get('code') == 0:
@@ -490,7 +525,7 @@ def main():
     tg_message_thread_id = ''
 
     try:
-        push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, account_names, exchange_plan = load_config()
+        push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, account_names, account_sites, exchange_plan = load_config()
 
         if not cookies_list:
             logger.error("未找到有效的 Cookie，退出程序。")
@@ -500,7 +535,10 @@ def main():
         else:
             for idx, cookie in enumerate(cookies_list, 1):
                 logger.info(f"正在处理第 {idx} 个账户...")
-                status, points, days, points_total, exchange, site = checkin_and_process(cookie, exchange_plan)
+                forced_site = get_forced_site(account_sites, idx - 1)
+                if forced_site:
+                    logger.info(f"第 {idx} 个账户已指定站点: {forced_site}")
+                status, points, days, points_total, exchange, site = checkin_and_process(cookie, exchange_plan, forced_site)
                 results.append({
                     'status': status,
                     'points': points,
