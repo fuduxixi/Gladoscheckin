@@ -53,7 +53,8 @@ koa:sess=eyJ1c2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxAwMH0=; koa:sess.sig=xJ
 cookie_glados&cookie_railgun&cookie_glados_2
 ```
 
-脚本会按 Cookie 自动识别当前账号属于老 GLaDOS 还是新 Railgun，无需分开配置。
+脚本默认会按 Cookie 自动识别当前账号属于老 GLaDOS 还是新 Railgun。
+如果你已经明确知道每个账号对应哪个站点，建议配置 `GLADOS_ACCOUNT_SITES`，避免自动探测误判。
 
 站点相关参数默认已内置，但也支持通过环境变量覆盖，方便站点域名、路径或页面结构变化后快速调整，无需改代码。
 
@@ -135,10 +136,20 @@ Telegram Bot：
 
 - `GLADOS_ACCOUNT_NAMES`：可选，多个账号名称使用 `&` 连接，顺序必须与 `GLADOS_COOKIES` 一致
 
+账号固定站点：
+
+- `GLADOS_ACCOUNT_SITES`：可选，多个站点标识使用 `&` 连接，顺序必须与 `GLADOS_COOKIES` 一致
+- 支持值：`glados`、`railgun`
+- 已配置的账号将直接走指定站点，不再自动探测；未配置项才回退为自动探测
+
 示例：
 
 ```text
 aaa@gmail.com&bbb@gmail.com
+```
+
+```text
+railgun&glados
 ```
 
 ### 3. 推送行为说明
