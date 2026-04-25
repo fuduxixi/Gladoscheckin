@@ -30,27 +30,118 @@ ENV_TG_MESSAGE_THREAD_ID = "TG_MESSAGE_THREAD_ID"
 ENV_ACCOUNT_NAMES = "GLADOS_ACCOUNT_NAMES"
 ENV_COOKIES = "GLADOS_COOKIES"
 ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
+ENV_SITE_ORDER = "GLADOS_SITE_ORDER"
 
 # API URLs
-CHECKIN_URL = "https://glados.cloud/api/user/checkin"
-STATUS_URL = "https://glados.cloud/api/user/status"
-POINTS_URL = "https://glados.cloud/api/user/points"
-EXCHANGE_URL = "https://glados.cloud/api/user/exchange"
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
-# POST DATA
-CHECKIN_DATA = {"token": "glados.cloud"} 
+DEFAULT_SITE_CONFIGS = {
+    "glados": {
+        "name": "GLaDOS",
+        "base_url": "https://glados.cloud",
+        "checkin_path": "/api/user/checkin",
+        "status_path": "/api/user/status",
+        "points_path": "/api/user/points",
+        "exchange_path": "/api/user/exchange",
+        "console_checkin_path": "/console/checkin",
+        "token": "glados.cloud",
+    },
+    "railgun": {
+        "name": "Railgun",
+        "base_url": "https://railgun.info",
+        "checkin_path": "/api/user/checkin",
+        "status_path": "/api/user/status",
+        "points_path": "/api/user/points",
+        "exchange_path": "/api/user/exchange",
+        "console_checkin_path": "/console/checkin",
+        "token": "railgun.info",
+    },
+}
+
+SITE_CONFIGS: Dict[str, Dict[str, object]] = {}
+SITE_DETECT_ORDER: List[str] = []
 
 # Request Headers
 HEADERS_TEMPLATE = {
-    'referer': 'https://glados.cloud/console/checkin',
-    'origin': "https://glados.cloud",
-    'user-agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36",
-    'content-type': 'application/json;charset=UTF-8'
+    'user-agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+    'content-type': 'application/json;charset=UTF-8',
+    'accept': 'application/json, text/plain, */*'
 }
 
 # Exchange Plan Points
-EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500} 
+EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500}
+
+
+def env_site_key_prefix(site_key: str) -> str:
+    # 站点环境变量前缀按站点 key 动态生成：
+    # glados -> GLADOS_GLADOS_*
+    # railgun -> GLADOS_RAILGUN_*
+    return f"GLADOS_{site_key.upper()}"
+
+
+def join_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def resolve_site_config(site_key: str, base_config: Dict[str, str]) -> Dict[str, object]:
+    # 这里不逐个声明常量，而是按 prefix 规则读取环境变量。
+    # 例如 glados 站读取 GLADOS_GLADOS_BASE_URL / GLADOS_GLADOS_TOKEN，
+    # railgun 站读取 GLADOS_RAILGUN_BASE_URL / GLADOS_RAILGUN_TOKEN。
+    prefix = env_site_key_prefix(site_key)
+    base_url = os.environ.get(f"{prefix}_BASE_URL", base_config["base_url"]).strip().rstrip("/")
+    checkin_path = os.environ.get(f"{prefix}_CHECKIN_PATH", base_config["checkin_path"]).strip()
+    status_path = os.environ.get(f"{prefix}_STATUS_PATH", base_config["status_path"]).strip()
+    points_path = os.environ.get(f"{prefix}_POINTS_PATH", base_config["points_path"]).strip()
+    exchange_path = os.environ.get(f"{prefix}_EXCHANGE_PATH", base_config["exchange_path"]).strip()
+    console_checkin_path = os.environ.get(
+        f"{prefix}_CONSOLE_CHECKIN_PATH",
+        base_config["console_checkin_path"],
+    ).strip()
+    token = os.environ.get(f"{prefix}_TOKEN", base_config["token"]).strip()
+    site_name = os.environ.get(f"{prefix}_NAME", base_config["name"]).strip()
+
+    return {
+        "name": site_name,
+        "base_url": base_url,
+        "checkin_url": join_url(base_url, checkin_path),
+        "status_url": join_url(base_url, status_path),
+        "points_url": join_url(base_url, points_path),
+        "exchange_url": join_url(base_url, exchange_path),
+        "checkin_data": {"token": token},
+        "headers": {
+            'referer': join_url(base_url, console_checkin_path),
+            'origin': base_url,
+        },
+    }
+
+
+def initialize_site_configs() -> None:
+    global SITE_CONFIGS, SITE_DETECT_ORDER
+
+    SITE_CONFIGS = {
+        site_key: resolve_site_config(site_key, site_config)
+        for site_key, site_config in DEFAULT_SITE_CONFIGS.items()
+    }
+
+    default_order = ["railgun", "glados"]
+    raw_site_order = (os.environ.get(ENV_SITE_ORDER) or "").strip()
+    if raw_site_order:
+        requested_order = [item.strip().lower() for item in raw_site_order.split(",") if item.strip()]
+        valid_order = [item for item in requested_order if item in SITE_CONFIGS]
+        missing_sites = [item for item in requested_order if item not in SITE_CONFIGS]
+        if missing_sites:
+            logger.warning(f"忽略未知站点标识: {', '.join(missing_sites)}")
+        SITE_DETECT_ORDER = valid_order or default_order
+    else:
+        SITE_DETECT_ORDER = default_order
+
+    logger.info(
+        "已加载站点配置: %s",
+        ", ".join(
+            f"{site_key}={SITE_CONFIGS[site_key]['base_url']}" for site_key in SITE_DETECT_ORDER
+        ),
+    )
+
 
 def load_config() -> Tuple[str, str, str, str, List[str], List[str], str]:
     push_key_env = os.environ.get(ENV_PUSH_KEY)
@@ -122,6 +213,11 @@ def load_config() -> Tuple[str, str, str, str, List[str], List[str], str]:
     return push_key, tg_bot_token, tg_chat_id, tg_message_thread_id, cookies_list, account_names, exchange_plan
 
 
+def build_headers(site_key: str) -> Dict[str, str]:
+    site_headers = SITE_CONFIGS[site_key].get("headers", {})
+    return {**HEADERS_TEMPLATE, **site_headers}
+
+
 def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[Dict] = None, cookies: str = "") -> Optional[requests.Response]:
 
     session_headers = headers.copy()
@@ -129,9 +225,9 @@ def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[
 
     try:
         if method.upper() == 'POST':
-            response = requests.post(url, headers=session_headers, data=json.dumps(data))
+            response = requests.post(url, headers=session_headers, data=json.dumps(data), timeout=20)
         elif method.upper() == 'GET':
-            response = requests.get(url, headers=session_headers)
+            response = requests.get(url, headers=session_headers, timeout=20)
         else:
             logger.error(f"不支持的 HTTP 方法: {method}")
             return None
@@ -145,40 +241,74 @@ def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[
         return None
 
 
-def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str, str, str]:
+def detect_site(cookie: str) -> Optional[str]:
+    for site_key in SITE_DETECT_ORDER:
+        site = SITE_CONFIGS[site_key]
+        status_response = make_request(site["status_url"], 'GET', build_headers(site_key), cookies=cookie)
+        if not status_response:
+            continue
+
+        try:
+            status_data = status_response.json()
+        except json.JSONDecodeError:
+            logger.warning(f"站点 {site['name']} 状态接口返回非 JSON，跳过探测。")
+            continue
+
+        if isinstance(status_data, dict):
+            if 'data' in status_data or 'leftDays' in status_data or status_data.get('code') == 0:
+                logger.info(f"Cookie 已识别为 {site['name']} 站点。")
+                return site_key
+
+    return None
+
+
+def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str, str, str, str]:
+
+    site_key = detect_site(cookie)
+    if not site_key:
+        return "站点识别失败", "0", "获取剩余天数失败", "获取剩余积分失败", "兑换跳过或失败", "未知站点"
+
+    site = SITE_CONFIGS[site_key]
+    site_name = site["name"]
+    site_headers = build_headers(site_key)
 
     status_msg = "签到请求失败"
     points_gained = "0"
     remaining_days = "获取剩余天数失败"
     remaining_points = "获取剩余积分失败"
     exchange_msg = "兑换跳过或失败"
+    points_data = {}
 
-    checkin_response = make_request(CHECKIN_URL, 'POST', HEADERS_TEMPLATE, CHECKIN_DATA, cookies=cookie)
+    checkin_response = make_request(site["checkin_url"], 'POST', site_headers, site["checkin_data"], cookies=cookie)
     if not checkin_response:
-        return status_msg, points_gained, remaining_days, remaining_points, exchange_msg
+        return status_msg, points_gained, remaining_days, remaining_points, exchange_msg, site_name
 
     try:
         checkin_data = checkin_response.json()
-        response_message = checkin_data.get('message', '无消息字段')
+        response_message = str(checkin_data.get('message', '无消息字段'))
         points_gained = str(checkin_data.get('points', 0))
+        response_message_lower = response_message.lower()
 
-        if "Checkin! Got" in response_message:
+        if "checkin" in response_message_lower and "got" in response_message_lower:
             status_msg = f"签到成功，获得 {points_gained} 积分"
-        elif "Checkin Repeats!" in response_message:
+        elif "repeat" in response_message_lower or "already" in response_message_lower:
             status_msg = "重复签到，明天再来"
             points_gained = "0"
+        elif checkin_data.get('code') == 0:
+            status_msg = f"签到成功，获得 {points_gained} 积分"
         else:
             status_msg = f"签到失败: {response_message}"
             points_gained = "0"
     except json.JSONDecodeError:
         logger.error(f"解析签到响应 JSON 失败: {checkin_response.text}")
-        return status_msg, points_gained, remaining_days, remaining_points, exchange_msg
+        return status_msg, points_gained, remaining_days, remaining_points, exchange_msg, site_name
 
-    status_response = make_request(STATUS_URL, 'GET', HEADERS_TEMPLATE, cookies=cookie)
+    status_response = make_request(site["status_url"], 'GET', site_headers, cookies=cookie)
     if status_response:
         try:
             status_data = status_response.json()
-            left_days_float = status_data.get('data', {}).get('leftDays', None)
+            status_payload = status_data.get('data', status_data)
+            left_days_float = status_payload.get('leftDays', None)
             if left_days_float is not None:
                 remaining_days = f"{int(float(left_days_float))} 天"
             else:
@@ -187,16 +317,18 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
             logger.error(f"解析状态响应 JSON 失败: {status_response.text}")
             remaining_days = "获取剩余天数失败 (JSON解析错误)"
         except (ValueError, TypeError):
-            logger.error(f"解析剩余天数时出错: {status_data.get('data', {}).get('leftDays', 'unknown')}")
+            logger.error(f"解析剩余天数时出错: {status_data.get('data', {}).get('leftDays', 'unknown') if 'status_data' in locals() else 'unknown'}")
             remaining_days = "获取剩余天数失败 (数值转换错误)"
     else:
         remaining_days = "获取剩余天数失败 (HTTP请求失败)"
 
-    points_response = make_request(POINTS_URL, 'GET', HEADERS_TEMPLATE, cookies=cookie)
+    points_response = make_request(site["points_url"], 'GET', site_headers, cookies=cookie)
     if points_response:
         try:
             points_data = points_response.json()
             points_float = points_data.get('points', None)
+            if points_float is None:
+                points_float = points_data.get('data', {}).get('points', None) if isinstance(points_data.get('data'), dict) else None
             if points_float is not None:
                 remaining_points = f"{int(float(points_float))} 积分"
             else:
@@ -205,21 +337,24 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
             logger.error(f"解析积分响应 JSON 失败: {points_response.text}")
             remaining_points = "获取剩余积分失败 (JSON解析错误)"
         except (ValueError, TypeError):
-            logger.error(f"解析剩余积分时出错: {points_data.get('points', 'unknown')}")
+            logger.error(f"解析剩余积分时出错: {points_data.get('points', 'unknown') if isinstance(points_data, dict) else 'unknown'}")
             remaining_points = "获取剩余积分失败 (数值转换错误)"
     else:
         remaining_points = "获取剩余积分失败 (HTTP请求失败)"
 
     current_points_numeric = 0
     try:
-        current_points_numeric = int(float(points_data.get('points', 0)))
-    except (ValueError, TypeError):
+        current_points_source = points_data.get('points', 0)
+        if current_points_source in (None, '') and isinstance(points_data.get('data'), dict):
+            current_points_source = points_data.get('data', {}).get('points', 0)
+        current_points_numeric = int(float(current_points_source))
+    except (ValueError, TypeError, AttributeError):
         logger.warning(f"无法解析当前积分数值，可能影响兑换判断: {remaining_points}")
 
-    required_points = EXCHANGE_POINTS.get(exchange_plan, 500) 
+    required_points = EXCHANGE_POINTS.get(exchange_plan, 500)
     if current_points_numeric >= required_points:
-        logger.info(f"开始兑换 {exchange_plan} 计划 (需要 {required_points} 积分)")
-        exchange_response = make_request(EXCHANGE_URL, 'POST', HEADERS_TEMPLATE, {"planType": exchange_plan}, cookies=cookie)
+        logger.info(f"[{site_name}] 开始兑换 {exchange_plan} 计划 (需要 {required_points} 积分)")
+        exchange_response = make_request(site["exchange_url"], 'POST', site_headers, {"planType": exchange_plan}, cookies=cookie)
         if exchange_response:
             try:
                 exchange_data = exchange_response.json()
@@ -235,10 +370,10 @@ def checkin_and_process(cookie: str, exchange_plan: str) -> Tuple[str, str, str,
         else:
             exchange_msg = f"兑换请求失败：{exchange_plan}"
     else:
-        logger.info(f"积分不足以兑换 {exchange_plan}。所需: {required_points}, 当前: {current_points_numeric}")
+        logger.info(f"[{site_name}] 积分不足以兑换 {exchange_plan}。所需: {required_points}, 当前: {current_points_numeric}")
         exchange_msg = f"积分不足，未兑换: {exchange_plan}"
 
-    return status_msg, points_gained, remaining_days, remaining_points, exchange_msg
+    return status_msg, points_gained, remaining_days, remaining_points, exchange_msg, site_name
 
 
 def has_failures(results: List[Dict[str, str]]) -> bool:
@@ -262,7 +397,7 @@ def format_push_content(results: List[Dict[str, str]], account_names: List[str])
     content_lines = []
     for i, res in enumerate(results):
         line_parts = [
-            f"{get_account_label(account_names, i)}:",
+            f"{get_account_label(account_names, i)}[{res['site']}]:",
             f"P:{res['points']}",
             f"剩余天数:{res['days']}",
             f"总积分:{res['points_total']}",
@@ -293,6 +428,7 @@ def format_telegram_content(results: List[Dict[str, str]], account_names: List[s
     for i, res in enumerate(results):
         lines.extend([
             f"*{get_account_label(account_names, i)}*",
+            f"- 站点: `{res['site']}`",
             f"- 本次积分: `{res['points']}`",
             f"- 剩余天数: `{res['days']}`",
             f"- 总积分: `{res['points_total']}`",
@@ -344,6 +480,7 @@ def send_telegram_notification(
 
 
 def main():
+    initialize_site_configs()
     results: List[Dict[str, str]] = []
     failed = False
     telegram_markdown_text = None
@@ -363,13 +500,14 @@ def main():
         else:
             for idx, cookie in enumerate(cookies_list, 1):
                 logger.info(f"正在处理第 {idx} 个账户...")
-                status, points, days, points_total, exchange = checkin_and_process(cookie, exchange_plan)
+                status, points, days, points_total, exchange, site = checkin_and_process(cookie, exchange_plan)
                 results.append({
                     'status': status,
                     'points': points,
                     'days': days,
                     'points_total': points_total,
-                    'exchange': exchange
+                    'exchange': exchange,
+                    'site': site
                 })
 
             title, content = format_push_content(results, account_names)
