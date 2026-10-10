@@ -402,6 +402,10 @@ def checkin_and_process(cookie: str, exchange_plan: str, forced_site: Optional[s
         else:
             status_msg = f"签到失败: {response_message}"
             points_gained = "0"
+            logger.warning(
+                f"[{site_name}] 签到失败: code={checkin_data.get('code')}, "
+                f"message={response_message}, reason={checkin_data.get('reason')}"
+            )
     except json.JSONDecodeError:
         logger.error(f"解析签到响应 JSON 失败: {checkin_response.text}")
         return status_msg, points_gained, remaining_days, remaining_points, exchange_msg, site_name
