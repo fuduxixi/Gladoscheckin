@@ -49,6 +49,10 @@ jobs:
         GLADOS_ACCOUNT_NAMES: ${{ secrets.GLADOS_ACCOUNT_NAMES }}
         GLADOS_ACCOUNT_SITES: ${{ secrets.GLADOS_ACCOUNT_SITES }}
         GLADOS_COOKIES: ${{ secrets.GLADOS_COOKIES }}
+        GLADOS_COOKIE_RAILGUN: ${{ secrets.GLADOS_COOKIE_RAILGUN }}
+        GLADOS_COOKIE_GLADOS: ${{ secrets.GLADOS_COOKIE_GLADOS }}
+        GLADOS_NAME_RAILGUN: ${{ secrets.GLADOS_NAME_RAILGUN }}
+        GLADOS_NAME_GLADOS: ${{ secrets.GLADOS_NAME_GLADOS }}
         GLADOS_EXCHANGE_PLAN: ${{ secrets.GLADOS_EXCHANGE_PLAN }}
 
     - name: keep alive

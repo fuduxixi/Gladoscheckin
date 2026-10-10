@@ -34,6 +34,10 @@ ENV_ACCOUNT_SITES = "GLADOS_ACCOUNT_SITES"
 ENV_COOKIES = "GLADOS_COOKIES"
 ENV_EXCHANGE_PLAN = "GLADOS_EXCHANGE_PLAN"
 ENV_SITE_ORDER = "GLADOS_SITE_ORDER"
+# 按站点分账号（推荐）：GLADOS_COOKIE_RAILGUN / GLADOS_COOKIE_GLADOS
+# 名称可选：GLADOS_NAME_RAILGUN / GLADOS_NAME_GLADOS
+ENV_SITE_COOKIE_PREFIX = "GLADOS_COOKIE"
+ENV_SITE_NAME_PREFIX = "GLADOS_NAME"
 
 # API URLs
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
@@ -176,6 +180,22 @@ def initialize_site_configs() -> None:
     )
 
 
+def load_per_site_accounts() -> List[Dict[str, str]]:
+    """按站点读取独立 Cookie：GLADOS_COOKIE_<SITEKEY>，名称取 GLADOS_NAME_<SITEKEY>。
+
+    这样每个账号单独一个 secret，某个 Cookie 失效时只需更新那一个，
+    不必重写整条 GLADOS_COOKIES；站点同时被强制绑定，无需自动探测。
+    """
+    accounts: List[Dict[str, str]] = []
+    for site_key in SITE_DETECT_ORDER:
+        cookie = (os.environ.get(f"{ENV_SITE_COOKIE_PREFIX}_{site_key.upper()}") or "").strip()
+        if not cookie:
+            continue
+        name = (os.environ.get(f"{ENV_SITE_NAME_PREFIX}_{site_key.upper()}") or "").strip()
+        accounts.append({"site": site_key, "cookie": cookie, "name": name})
+    return accounts
+
+
 def load_config() -> Tuple[str, str, str, str, List[str], List[str], List[str], str]:
     push_key_env = os.environ.get(ENV_PUSH_KEY)
     tg_bot_token_env = os.environ.get(ENV_TG_BOT_TOKEN)
@@ -222,6 +242,27 @@ def load_config() -> Tuple[str, str, str, str, List[str], List[str], List[str], 
         account_sites = []
     else:
         account_sites = [site.strip().lower() for site in account_sites_env.split('&') if site.strip()]
+
+    # 按站点分账号（推荐）：只要设置了任意 GLADOS_COOKIE_<站点>，就优先使用它，
+    # 忽略整条 GLADOS_COOKIES。这样单个账号失效时只改对应的那一个 secret。
+    site_accounts = load_per_site_accounts()
+    if site_accounts:
+        if cookies_list:
+            logger.warning(
+                f"同时检测到 '{ENV_COOKIES}' 与按站点 Cookie，已按站点 Cookie 优先，忽略 '{ENV_COOKIES}'。"
+            )
+        cookies_list = [account["cookie"] for account in site_accounts]
+        account_sites = [account["site"] for account in site_accounts]
+        account_names = [
+            account["name"] or (account_names[index] if index < len(account_names) else "")
+            for index, account in enumerate(site_accounts)
+        ]
+        logger.info(
+            "已启用按站点 Cookie: %s",
+            ", ".join(
+                f"{account['site']}({account['name'] or '未命名'})" for account in site_accounts
+            ),
+        )
 
     if not exchange_plan_env:
         logger.warning(f"环境变量 '{ENV_EXCHANGE_PLAN}' 未设置，将使用默认兑换计划 'plan500'。")
