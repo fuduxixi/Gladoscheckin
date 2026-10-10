@@ -180,19 +180,38 @@ def initialize_site_configs() -> None:
     )
 
 
+# 每个站点最多支持的账号数（对应 GLADOS_COOKIE_<站点>1..N）
+MAX_ACCOUNTS_PER_SITE = 5
+
+
 def load_per_site_accounts() -> List[Dict[str, str]]:
-    """按站点读取独立 Cookie：GLADOS_COOKIE_<SITEKEY>，名称取 GLADOS_NAME_<SITEKEY>。
+    """按站点读取独立 Cookie：GLADOS_COOKIE_<SITEKEY>[序号]，名称取 GLADOS_NAME_<SITEKEY>[序号]。
+
+    同一个站点要挂多个账号时用序号区分，例如：
+        GLADOS_COOKIE_RAILGUN1 / GLADOS_COOKIE_RAILGUN2 ...
+    不带序号的写法等价于序号 1（同一个 Cookie 只会取用一次）。
 
     这样每个账号单独一个 secret，某个 Cookie 失效时只需更新那一个，
     不必重写整条 GLADOS_COOKIES；站点同时被强制绑定，无需自动探测。
     """
     accounts: List[Dict[str, str]] = []
+    seen_cookies = set()
     for site_key in SITE_DETECT_ORDER:
-        cookie = (os.environ.get(f"{ENV_SITE_COOKIE_PREFIX}_{site_key.upper()}") or "").strip()
-        if not cookie:
-            continue
-        name = (os.environ.get(f"{ENV_SITE_NAME_PREFIX}_{site_key.upper()}") or "").strip()
-        accounts.append({"site": site_key, "cookie": cookie, "name": name})
+        upper = site_key.upper()
+        suffixes = [""] + [str(index) for index in range(1, MAX_ACCOUNTS_PER_SITE + 1)]
+        for suffix in suffixes:
+            cookie_env = f"{ENV_SITE_COOKIE_PREFIX}_{upper}{suffix}"
+            cookie = (os.environ.get(cookie_env) or "").strip()
+            if not cookie or cookie in seen_cookies:
+                continue
+            seen_cookies.add(cookie)
+            name = (os.environ.get(f"{ENV_SITE_NAME_PREFIX}_{upper}{suffix}") or "").strip()
+            accounts.append({
+                "site": site_key,
+                "cookie": cookie,
+                "name": name,
+                "env": cookie_env,
+            })
     return accounts
 
 
@@ -260,7 +279,8 @@ def load_config() -> Tuple[str, str, str, str, List[str], List[str], List[str], 
         logger.info(
             "已启用按站点 Cookie: %s",
             ", ".join(
-                f"{account['site']}({account['name'] or '未命名'})" for account in site_accounts
+                f"{account['site']}({account['name'] or '未命名'})={account['env']}"
+                for account in site_accounts
             ),
         )
 

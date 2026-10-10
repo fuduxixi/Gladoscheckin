@@ -45,18 +45,30 @@
 | `GLADOS_NAME_RAILGUN` | 可选 | 新站账号显示名，例如 `account1@example.com` |
 | `GLADOS_NAME_GLADOS` | 可选 | 老站账号显示名，例如 `account2@example.com` |
 
+**同一个站点有多个账号时，加序号**（每个站点最多 5 个）：
+
+| Secret | 说明 |
+|---|---|
+| `GLADOS_COOKIE_RAILGUN1` / `RAILGUN2` / … / `RAILGUN5` | 新站第 1~5 个账号 |
+| `GLADOS_COOKIE_GLADOS1` / `GLADOS2` / … / `GLADOS5` | 老站第 1~5 个账号 |
+| `GLADOS_NAME_RAILGUN1` / `GLADOS_NAME_GLADOS1` / … | 与序号一一对应的显示名 |
+
+- 不带序号的 `GLADOS_COOKIE_RAILGUN` **等价于 `RAILGUN1`**，两种写法可混用（同一个 Cookie 只会签到一次）
+- 序号可以不连续（例如只用 `1` 和 `3`），按序号从小到大执行
+- 用序号时，**每个账号依然是独立 secret，谁失效改谁**
+
 行为说明：
 
 - 只要设置了**任意一个** `GLADOS_COOKIE_*`，脚本就进入「按站点模式」：
-  - 该账号的站点**强制绑定**，不再自动探测，也就不会再出现「站点识别失败」
+  - 每个账号的站点**强制绑定**，不再自动探测，也就不会再出现「站点识别失败」
   - 此时**整条 `GLADOS_COOKIES` 会被忽略**（日志会提示），避免同一账号重复签到
-- 两个站点各只支持一个账号；同一站点多账号请用方式二
-- 没配 `GLADOS_NAME_*` 时，按顺序回退到 `GLADOS_ACCOUNT_NAMES` 的位置取值，取不到就显示 `账号 N`
+- 执行顺序：先按站点顺序（默认 `railgun` → `glados`），站内按序号从小到大
+- 没配 `GLADOS_NAME_*` 时，按顺序回退到 `GLADOS_ACCOUNT_NAMES` 的位置取值，取不到就显示 `账号 N`（建议直接配 `GLADOS_NAME_*`）
 
 日志特征：
 
 ```text
-已启用按站点 Cookie: railgun(account1@example.com), glados(account2@example.com)
+已启用按站点 Cookie: railgun(account1@example.com)=GLADOS_COOKIE_RAILGUN, glados(account2@example.com)=GLADOS_COOKIE_GLADOS
 第 1 个账户已指定站点: railgun
 第 2 个账户已指定站点: glados
 ```
@@ -79,7 +91,7 @@ cookie_railgun&cookie_glados
 | 场景 | 建议 |
 |---|---|
 | 每个站点各一个账号（最常见） | **方式一**，独立 secret，哪个失效改哪个 |
-| 同一站点多个账号 | 方式二 + `GLADOS_ACCOUNT_SITES` |
+| 同一站点多个账号 | **方式一 + 序号**（`GLADOS_COOKIE_RAILGUN1/2/…`），依旧每个账号一个 secret |
 | 从旧配置迁移 | 先建好 `GLADOS_COOKIE_*`，跑一次确认正常后，可删掉 `GLADOS_COOKIES` |
 
 ---
@@ -108,9 +120,8 @@ koa:sess=eyJ1c2...wMH0=; koa:sess.sig=xJkOxxxxxxxxxxxxxxxtnM;
 
 | 名称 | 必填 | 说明 |
 |---|---|---|
-| `GLADOS_COOKIE_RAILGUN` | 见上 | 新站 Cookie（推荐） |
-| `GLADOS_COOKIE_GLADOS` | 见上 | 老站 Cookie（推荐） |
-| `GLADOS_NAME_RAILGUN` / `GLADOS_NAME_GLADOS` | 可选 | 按站点账号显示名 |
+| `GLADOS_COOKIE_<SITE>` / `GLADOS_COOKIE_<SITE><N>` | 见上 | 按站点 Cookie，同站多号加序号 `1~5`（推荐），`<SITE>` = `RAILGUN` / `GLADOS` |
+| `GLADOS_NAME_<SITE>` / `GLADOS_NAME_<SITE><N>` | 可选 | 与 Cookie 序号对应的显示名 |
 | `GLADOS_COOKIES` | 兼容 | 多账号合并 Cookie，`&` 连接 |
 | `GLADOS_ACCOUNT_NAMES` | 可选 | 多账号显示名，`&` 连接，与 `GLADOS_COOKIES` 顺序一致 |
 | `GLADOS_ACCOUNT_SITES` | 可选 | 多账号站点绑定，`&` 连接，取值 `railgun` / `glados` |
@@ -271,6 +282,7 @@ README.md
 
 - **2026-10**：
   - 新增**按站点分账号 Cookie**：`GLADOS_COOKIE_RAILGUN` / `GLADOS_COOKIE_GLADOS`（+ 可选 `GLADOS_NAME_*`），单个账号失效只改一个 secret，站点强制绑定
+  - 支持**同站多账号**：`GLADOS_COOKIE_<站点>1~5` 加序号（不带序号等价于 1，重复值自动去重），仍是每账号一个 secret
   - workflow 补上 `GLADOS_ACCOUNT_SITES` 转发（此前 secret 已建但从未传给脚本）
   - 站点识别失败时打印每个站的 `HTTP / code / message`，签到失败时打印 `code / reason`，便于定位
   - 新增 `code:4 device-mismatch` 设备平台自适应（按 `loginDevice` 切换 UA 重试一次）
