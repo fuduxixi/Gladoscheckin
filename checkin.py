@@ -5,6 +5,8 @@ import logging
 import datetime
 from typing import Dict, List, Optional, Tuple
 from pypushdeer import PushDeer
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 def beijing_time_converter(timestamp):
     utc_dt = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
@@ -68,6 +70,36 @@ HEADERS_TEMPLATE = {
     'content-type': 'application/json;charset=UTF-8',
     'accept': 'application/json, text/plain, */*'
 }
+
+# 各平台合法 User-Agent（版本号无关，仅平台 token 关键）
+# 用于 code 4 / device-mismatch 时按服务端 loginDevice 切换 UA 重试
+PLATFORM_UA = {
+    "Windows": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "macOS": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Linux": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "iPhone": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+    "Android": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+}
+
+# 网络层重试/退避：降低 CI 网络抖动导致的误报失败
+def _build_http_session() -> requests.Session:
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=1,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET", "POST"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+HTTP_SESSION = _build_http_session()
 
 # Exchange Plan Points
 EXCHANGE_POINTS = {"plan100": 100, "plan200": 200, "plan500": 500}
@@ -239,16 +271,18 @@ def build_headers(site_key: str) -> Dict[str, str]:
     return {**HEADERS_TEMPLATE, **site_headers}
 
 
-def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[Dict] = None, cookies: str = "") -> Optional[requests.Response]:
+def make_request(url: str, method: str, headers: Dict[str, str], data: Optional[Dict] = None, cookies: str = "", user_agent: Optional[str] = None) -> Optional[requests.Response]:
 
     session_headers = headers.copy()
     session_headers['cookie'] = cookies
+    if user_agent:
+        session_headers['user-agent'] = user_agent
 
     try:
         if method.upper() == 'POST':
-            response = requests.post(url, headers=session_headers, data=json.dumps(data), timeout=20)
+            response = HTTP_SESSION.post(url, headers=session_headers, data=json.dumps(data), timeout=20)
         elif method.upper() == 'GET':
-            response = requests.get(url, headers=session_headers, timeout=20)
+            response = HTTP_SESSION.get(url, headers=session_headers, timeout=20)
         else:
             logger.error(f"不支持的 HTTP 方法: {method}")
             return None
@@ -276,18 +310,29 @@ def detect_site(cookie: str) -> Optional[str]:
         site = SITE_CONFIGS[site_key]
         status_response = make_request(site["status_url"], 'GET', build_headers(site_key), cookies=cookie)
         if not status_response:
+            logger.warning(f"站点 {site['name']} 状态接口请求失败，跳过探测。")
             continue
 
         try:
             status_data = status_response.json()
         except json.JSONDecodeError:
-            logger.warning(f"站点 {site['name']} 状态接口返回非 JSON，跳过探测。")
+            logger.warning(
+                f"站点 {site['name']} 状态接口返回非 JSON（HTTP {status_response.status_code}），跳过探测。"
+                f"响应片段: {status_response.text[:200]}"
+            )
             continue
 
         if isinstance(status_data, dict):
             if 'data' in status_data or 'leftDays' in status_data or status_data.get('code') == 0:
                 logger.info(f"Cookie 已识别为 {site['name']} 站点。")
                 return site_key
+
+        # 未通过识别时输出原因，便于区分「Cookie 失效」与「接口/站点变更」
+        logger.warning(
+            f"站点 {site['name']} 未通过识别: HTTP {status_response.status_code}, "
+            f"code={status_data.get('code') if isinstance(status_data, dict) else 'N/A'}, "
+            f"message={status_data.get('message') if isinstance(status_data, dict) else 'N/A'}"
+        )
 
     return None
 
@@ -315,6 +360,29 @@ def checkin_and_process(cookie: str, exchange_plan: str, forced_site: Optional[s
 
     try:
         checkin_data = checkin_response.json()
+    except json.JSONDecodeError:
+        logger.error(f"解析签到响应 JSON 失败: {checkin_response.text}")
+        return status_msg, points_gained, remaining_days, remaining_points, exchange_msg, site_name
+
+    # 设备平台不匹配(code 4)时，按服务端返回的 loginDevice 切换 UA 重试一次
+    if checkin_data.get('code') == 4 and checkin_data.get('reason') == 'device-mismatch':
+        login_device = checkin_data.get('loginDevice')
+        recover_ua = PLATFORM_UA.get(login_device)
+        if recover_ua:
+            logger.warning(f"[{site_name}] 检测到设备平台不匹配 (loginDevice={login_device})，切换 UA 重试一次。")
+            retry_response = make_request(
+                site["checkin_url"], 'POST', site_headers, site["checkin_data"],
+                cookies=cookie, user_agent=recover_ua,
+            )
+            if retry_response:
+                try:
+                    checkin_data = retry_response.json()
+                except json.JSONDecodeError:
+                    logger.error(f"解析签到重试响应 JSON 失败: {retry_response.text}")
+        else:
+            logger.warning(f"[{site_name}] 设备平台不匹配，但未识别的 loginDevice: {login_device}")
+
+    try:
         response_message = str(checkin_data.get('message', '无消息字段'))
         points_gained = str(checkin_data.get('points', 0))
         response_message_lower = response_message.lower()
